@@ -1,0 +1,436 @@
+import streamlit as st
+import os
+import json
+import re
+from typing import List, Dict, Tuple
+import google.generativeai as genai
+from pathlib import Path
+import time
+from dotenv import load_dotenv
+import PyPDF2
+import io
+from datetime import datetime
+
+# Load environment variables
+load_dotenv()
+
+class DatasetGenerator:
+    def __init__(self, api_key: str):
+        """Initialize the dataset generator with Gemini API key."""
+        genai.configure(api_key=api_key)
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
+        
+    def read_text_file(self, uploaded_file) -> str:
+        """Read uploaded text file."""
+        try:
+            return str(uploaded_file.read(), "utf-8")
+        except Exception as e:
+            st.error(f"Error reading text file: {e}")
+            return ""
+    
+    def read_pdf_file(self, uploaded_file) -> str:
+        """Read uploaded PDF file."""
+        try:
+            pdf_reader = PyPDF2.PdfReader(uploaded_file)
+            text = ""
+            for page in pdf_reader.pages:
+                text += page.extract_text() + "\n"
+            return text
+        except Exception as e:
+            st.error(f"Error reading PDF file: {e}")
+            return ""
+    
+    def split_by_word_count(self, text: str, words_per_chunk: int) -> List[str]:
+        """Split text into chunks based on word count."""
+        words = text.split()
+        chunks = []
+        
+        for i in range(0, len(words), words_per_chunk):
+            chunk = ' '.join(words[i:i + words_per_chunk])
+            if chunk.strip():
+                chunks.append(chunk.strip())
+        
+        return chunks
+    
+    def generate_qa_pairs(self, chunk: str, custom_prompt: str, num_questions: int, num_turns: int) -> List[Dict]:
+        """Generate Q&A pairs for a given chunk using Gemini."""
+        
+        if num_turns == 1:
+            format_instructions = """
+Format for each conversation:
+CONVERSATION X:
+QUESTION: [user question, all lowercase]
+ANSWER: [AI response based on text]
+"""
+        else:  # num_turns == 2
+            format_instructions = """
+Format for each conversation:
+CONVERSATION X:
+QUESTION: [initial question from user, all lowercase]
+ANSWER: [AI response based on text]
+FOLLOW-UP: [natural follow-up question, all lowercase]
+FOLLOW-UP ANSWER: [AI response to follow-up, also based on text]
+"""
+        
+        prompt = f"""
+{custom_prompt}
+
+Based on the following text, generate {num_questions} conversation pairs with {num_turns} turn(s) each.
+
+Requirements:
+- User questions should be natural and use lowercase
+- AI responses should be informative and based on the provided text
+- Cover the major concepts mentioned in the text
+- Each conversation should feel natural and educational
+
+{format_instructions}
+
+Text content:
+{chunk}
+
+Generate exactly {num_questions} conversations that thoroughly cover the content:
+"""
+        
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self.model.generate_content(prompt)
+                if response.text:
+                    return self.parse_qa_response(response.text, num_turns)
+                else:
+                    st.warning(f"Empty response from Gemini on attempt {attempt + 1}")
+            except Exception as e:
+                st.error(f"Error generating Q&A pairs (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                else:
+                    st.error("Max retries reached, skipping this chunk")
+        
+        return []
+    
+    def parse_qa_response(self, response_text: str, num_turns: int) -> List[Dict]:
+        """Parse Gemini response into structured conversation pairs."""
+        conversations = []
+        
+        # Split by CONVERSATION to find each conversation
+        parts = response_text.split('CONVERSATION')[1:]  # Skip first empty part
+        
+        for part in parts:
+            try:
+                if num_turns == 1:
+                    # Parse single turn conversation
+                    if 'QUESTION:' in part and 'ANSWER:' in part:
+                        sections = part.split('QUESTION:', 1)[1]
+                        
+                        if 'ANSWER:' in sections:
+                            question_part, answer_part = sections.split('ANSWER:', 1)
+                            question = question_part.strip()
+                            answer = answer_part.strip()
+                            
+                            # Clean up formatting
+                            question = re.sub(r'^[0-9]+\.?\s*', '', question).strip().lower()
+                            answer = re.sub(r'\n\n+', '\n\n', answer).strip()
+                            
+                            if question and answer:
+                                conversations.append({
+                                    'question': question,
+                                    'answer': answer
+                                })
+                else:
+                    # Parse two turn conversation (existing logic)
+                    if 'QUESTION:' in part and 'ANSWER:' in part and 'FOLLOW-UP:' in part and 'FOLLOW-UP ANSWER:' in part:
+                        sections = part.split('QUESTION:', 1)[1]
+                        
+                        if 'ANSWER:' in sections:
+                            question_part, rest = sections.split('ANSWER:', 1)
+                            question = question_part.strip()
+                            
+                            if 'FOLLOW-UP:' in rest:
+                                answer_part, followup_rest = rest.split('FOLLOW-UP:', 1)
+                                answer = answer_part.strip()
+                                
+                                if 'FOLLOW-UP ANSWER:' in followup_rest:
+                                    followup_question_part, followup_answer_part = followup_rest.split('FOLLOW-UP ANSWER:', 1)
+                                    followup_question = followup_question_part.strip()
+                                    followup_answer = followup_answer_part.strip()
+                                    
+                                    # Clean up formatting
+                                    question = re.sub(r'^[0-9]+\.?\s*', '', question).strip().lower()
+                                    answer = re.sub(r'\n\n+', '\n\n', answer).strip()
+                                    followup_question = re.sub(r'^[0-9]+\.?\s*', '', followup_question).strip().lower()
+                                    followup_answer = re.sub(r'\n\n+', '\n\n', followup_answer).strip()
+                                    
+                                    if question and answer and followup_question and followup_answer:
+                                        conversations.append({
+                                            'question': question,
+                                            'answer': answer,
+                                            'followup_question': followup_question,
+                                            'followup_answer': followup_answer
+                                        })
+            except Exception as e:
+                continue
+        
+        return conversations
+    
+    def format_for_model(self, conversations: List[Dict], model_format: str, num_turns: int) -> List[str]:
+        """Format conversation pairs based on the selected model format."""
+        formatted_examples = []
+        
+        for conv in conversations:
+            if model_format == "Gemma":
+                if num_turns == 1:
+                    conversation = {
+                        "text": f"<start_of_turn>user\n{conv['question']}<end_of_turn>\n<start_of_turn>model\n{conv['answer']}<end_of_turn>"
+                    }
+                else:
+                    conversation = {
+                        "text": f"<start_of_turn>user\n{conv['question']}<end_of_turn>\n<start_of_turn>model\n{conv['answer']}<end_of_turn>\n<start_of_turn>user\n{conv['followup_question']}<end_of_turn>\n<start_of_turn>model\n{conv['followup_answer']}<end_of_turn>"
+                    }
+            
+            elif model_format == "Llama":
+                if num_turns == 1:
+                    conversation = {
+                        "text": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{conv['question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['answer']}<|eot_id|>"
+                    }
+                else:
+                    conversation = {
+                        "text": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{conv['question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['answer']}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{conv['followup_question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['followup_answer']}<|eot_id|>"
+                    }
+            
+            elif model_format == "ChatML":
+                if num_turns == 1:
+                    conversation = {
+                        "text": f"<|im_start|>user\n{conv['question']}<|im_end|>\n<|im_start|>assistant\n{conv['answer']}<|im_end|>"
+                    }
+                else:
+                    conversation = {
+                        "text": f"<|im_start|>user\n{conv['question']}<|im_end|>\n<|im_start|>assistant\n{conv['answer']}<|im_end|>\n<|im_start|>user\n{conv['followup_question']}<|im_end|>\n<|im_start|>assistant\n{conv['followup_answer']}<|im_end|>"
+                    }
+            
+            elif model_format == "Alpaca":
+                if num_turns == 1:
+                    conversation = {
+                        "instruction": conv['question'],
+                        "input": "",
+                        "output": conv['answer']
+                    }
+                else:
+                    conversation = {
+                        "instruction": conv['question'],
+                        "input": "",
+                        "output": conv['answer'],
+                        "follow_up_instruction": conv['followup_question'],
+                        "follow_up_output": conv['followup_answer']
+                    }
+            
+            elif model_format == "ShareGPT":
+                if num_turns == 1:
+                    conversation = {
+                        "conversations": [
+                            {"from": "human", "value": conv['question']},
+                            {"from": "gpt", "value": conv['answer']}
+                        ]
+                    }
+                else:
+                    conversation = {
+                        "conversations": [
+                            {"from": "human", "value": conv['question']},
+                            {"from": "gpt", "value": conv['answer']},
+                            {"from": "human", "value": conv['followup_question']},
+                            {"from": "gpt", "value": conv['followup_answer']}
+                        ]
+                    }
+            
+            else:  # Generic format
+                conversation = conv
+            
+            formatted_examples.append(json.dumps(conversation, ensure_ascii=False))
+        
+        return formatted_examples
+
+def main():
+    st.set_page_config(
+        page_title="Dataset Generator",
+        page_icon="📊",
+        layout="wide"
+    )
+    
+    st.title("📊 Dataset Generator for Fine-tuning")
+    st.markdown("Generate training datasets from your text files for fine-tuning language models")
+    
+    # Sidebar for configuration
+    st.sidebar.header("⚙️ Configuration")
+    
+    # API Key input
+    api_key = st.sidebar.text_input(
+        "Gemini API Key",
+        value=os.getenv('GEMINI_API_KEY', ''),
+        type="password",
+        help="Enter your Google Gemini API key"
+    )
+    
+    if not api_key:
+        st.warning("Please enter your Gemini API key to continue")
+        return
+    
+    # File upload
+    st.sidebar.subheader("📁 Upload File")
+    uploaded_file = st.sidebar.file_uploader(
+        "Choose a file",
+        type=['txt', 'pdf'],
+        help="Upload a text file or PDF to generate dataset from"
+    )
+    
+    if not uploaded_file:
+        st.info("Please upload a text file or PDF to get started")
+        return
+    
+    # Configuration options
+    st.sidebar.subheader("🔧 Generation Settings")
+    
+    words_per_chunk = st.sidebar.slider(
+        "Words per chunk",
+        min_value=50,
+        max_value=2000,
+        value=300,
+        step=50,
+        help="Number of words to include in each chunk"
+    )
+    
+    questions_per_chunk = st.sidebar.slider(
+        "Questions per chunk",
+        min_value=1,
+        max_value=10,
+        value=3,
+        help="Number of Q&A pairs to generate per chunk"
+    )
+    
+    num_turns = st.sidebar.selectbox(
+        "Number of turns",
+        options=[1, 2],
+        index=1,
+        help="1 = User + Assistant, 2 = User + Assistant + User + Assistant"
+    )
+    
+    model_format = st.sidebar.selectbox(
+        "Model format",
+        options=["Gemma", "Llama", "ChatML", "Alpaca", "ShareGPT", "Generic"],
+        index=0,
+        help="Select the format for your target model"
+    )
+    
+    # Custom prompt
+    st.sidebar.subheader("✍️ Custom Prompt")
+    custom_prompt = st.sidebar.text_area(
+        "Generation prompt",
+        value="Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations.",
+        height=150,
+        help="Customize the prompt for generating Q&A pairs"
+    )
+    
+    # Main content area
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("📄 File Content Preview")
+        
+        # Initialize generator
+        try:
+            generator = DatasetGenerator(api_key)
+            
+            # Read file content
+            if uploaded_file.type == "text/plain":
+                text_content = generator.read_text_file(uploaded_file)
+            else:  # PDF
+                text_content = generator.read_pdf_file(uploaded_file)
+            
+            if text_content:
+                st.text_area("Content preview", text_content[:1000] + "..." if len(text_content) > 1000 else text_content, height=200)
+                
+                # Split into chunks
+                chunks = generator.split_by_word_count(text_content, words_per_chunk)
+                st.info(f"📊 File will be split into {len(chunks)} chunks")
+                
+                # Show chunk details
+                with st.expander("View chunk details"):
+                    for i, chunk in enumerate(chunks[:3]):  # Show first 3 chunks
+                        st.write(f"**Chunk {i+1}** ({len(chunk.split())} words)")
+                        st.write(chunk[:200] + "..." if len(chunk) > 200 else chunk)
+                        st.write("---")
+                    if len(chunks) > 3:
+                        st.write(f"... and {len(chunks) - 3} more chunks")
+            
+        except Exception as e:
+            st.error(f"Error initializing generator: {e}")
+            return
+    
+    with col2:
+        st.subheader("🚀 Generate Dataset")
+        
+        if st.button("Generate Dataset", type="primary"):
+            if not text_content:
+                st.error("No content to process")
+                return
+            
+            # Progress tracking
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            generated_examples = []
+            
+            for i, chunk in enumerate(chunks):
+                status_text.text(f"Processing chunk {i+1}/{len(chunks)}...")
+                progress_bar.progress((i + 1) / len(chunks))
+                
+                conversations = generator.generate_qa_pairs(
+                    chunk, custom_prompt, questions_per_chunk, num_turns
+                )
+                
+                if conversations:
+                    formatted_examples = generator.format_for_model(
+                        conversations, model_format, num_turns
+                    )
+                    generated_examples.extend(formatted_examples)
+                
+                # Add delay to be respectful to API
+                time.sleep(1)
+            
+            status_text.text("Dataset generation complete!")
+            
+            if generated_examples:
+                st.success(f"✅ Generated {len(generated_examples)} training examples!")
+                
+                # Show sample
+                with st.expander("Preview generated examples"):
+                    for i, example in enumerate(generated_examples[:3]):
+                        st.write(f"**Example {i+1}:**")
+                        st.code(example, language="json")
+                        st.write("---")
+                
+                # Download button
+                dataset_content = "\n".join(generated_examples)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"dataset_{model_format.lower()}_{timestamp}.jsonl"
+                
+                st.download_button(
+                    label="📥 Download Dataset",
+                    data=dataset_content,
+                    file_name=filename,
+                    mime="application/json"
+                )
+                
+                # Show statistics
+                st.subheader("📈 Generation Statistics")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Examples", len(generated_examples))
+                with col2:
+                    st.metric("Chunks Processed", len(chunks))
+                with col3:
+                    st.metric("Success Rate", f"{len(generated_examples)/(len(chunks)*questions_per_chunk)*100:.1f}%")
+                
+            else:
+                st.error("No examples were generated. Please check your settings and try again.")
+
+if __name__ == "__main__":
+    main() 

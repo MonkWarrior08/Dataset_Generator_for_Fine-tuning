@@ -114,10 +114,15 @@ def main():
     """)
     custom_prompt = st.text_area(
         "Enter your custom prompt for dataset generation:",
-        value="Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations.",
+        value="",
+        placeholder="Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations.",
         height=150,
         help="Customize the prompt for generating Q&A pairs. This prompt will guide how the AI generates questions and answers from your content."
     )
+    
+    # Use default prompt if custom prompt is empty
+    if not custom_prompt.strip():
+        custom_prompt = "Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations."
     
     # Initialize generator
     try:

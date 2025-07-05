@@ -126,10 +126,3 @@ This project is open source and available under the MIT License.
 
 For issues or questions, please create an issue in the repository or contact the maintainers.
 
-## Step 3: Run the Application
-
-```bash
-streamlit run app.py
-```
-
-The application will open in your browser at `http://localhost:8501` 

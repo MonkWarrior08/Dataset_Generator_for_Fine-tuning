@@ -75,17 +75,17 @@ class DatasetGenerator:
         
         return chunks
     
-    def generate_qa_pairs(self, chunk: str, custom_prompt: str, num_questions: int, num_turns: int) -> List[Dict]:
+    def generate_qa_pairs(self, chunk: str, custom_prompt: str, num_questions: int, num_exchanges: int) -> List[Dict]:
         """Generate Q&A pairs for a given chunk using selected AI model."""
         
-        if num_turns == 1:
+        if num_exchanges == 1:
             format_instructions = """
 Format for each conversation:
 CONVERSATION X:
 QUESTION: [user question, all lowercase]
 ANSWER: [AI response based on text]
 """
-        else:  # num_turns == 2
+        else:  # num_exchanges == 2
             format_instructions = """
 Format for each conversation:
 CONVERSATION X:
@@ -98,7 +98,7 @@ FOLLOW-UP ANSWER: [AI response to follow-up, also based on text]
         prompt = f"""
 {custom_prompt}
 
-Based on the following text, generate {num_questions} conversation pairs with {num_turns} turn(s) each.
+Based on the following text, generate {num_questions} conversation pairs with {num_exchanges} exchange(s) each.
 
 Requirements:
 - User questions should be natural and use lowercase
@@ -119,7 +119,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
             try:
                 response_text = self._get_model_response(prompt)
                 if response_text:
-                    return self.parse_qa_response(response_text, num_turns)
+                    return self.parse_qa_response(response_text, num_exchanges)
                 else:
                     st.warning(f"Empty response from {self.model_provider} on attempt {attempt + 1}")
             except Exception as e:
@@ -161,8 +161,8 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
         else:
             raise ValueError(f"Unsupported model provider: {self.model_provider}")
     
-    def parse_qa_response(self, response_text: str, num_turns: int) -> List[Dict]:
-        """Parse Gemini response into structured conversation pairs."""
+    def parse_qa_response(self, response_text: str, num_exchanges: int) -> List[Dict]:
+        """Parse response into structured conversation pairs."""
         conversations = []
         
         # Split by CONVERSATION to find each conversation
@@ -170,8 +170,8 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
         
         for part in parts:
             try:
-                if num_turns == 1:
-                    # Parse single turn conversation
+                if num_exchanges == 1:
+                    # Parse single exchange conversation
                     if 'QUESTION:' in part and 'ANSWER:' in part:
                         sections = part.split('QUESTION:', 1)[1]
                         
@@ -190,7 +190,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                                     'answer': answer
                                 })
                 else:
-                    # Parse two turn conversation (existing logic)
+                    # Parse two exchange conversation
                     if 'QUESTION:' in part and 'ANSWER:' in part and 'FOLLOW-UP:' in part and 'FOLLOW-UP ANSWER:' in part:
                         sections = part.split('QUESTION:', 1)[1]
                         
@@ -225,13 +225,13 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
         
         return conversations
     
-    def format_for_model(self, conversations: List[Dict], model_format: str, num_turns: int) -> List[str]:
+    def format_for_model(self, conversations: List[Dict], model_format: str, num_exchanges: int) -> List[str]:
         """Format conversation pairs based on the selected model format."""
         formatted_examples = []
         
         for conv in conversations:
             if model_format == "Gemma":
-                if num_turns == 1:
+                if num_exchanges == 1:
                     conversation = {
                         "text": f"<start_of_turn>user\n{conv['question']}<end_of_turn>\n<start_of_turn>model\n{conv['answer']}<end_of_turn>"
                     }
@@ -241,7 +241,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                     }
             
             elif model_format == "Llama":
-                if num_turns == 1:
+                if num_exchanges == 1:
                     conversation = {
                         "text": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{conv['question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['answer']}<|eot_id|>"
                     }
@@ -251,7 +251,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                     }
             
             elif model_format == "ChatML":
-                if num_turns == 1:
+                if num_exchanges == 1:
                     conversation = {
                         "text": f"<|im_start|>user\n{conv['question']}<|im_end|>\n<|im_start|>assistant\n{conv['answer']}<|im_end|>"
                     }
@@ -261,7 +261,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                     }
             
             elif model_format == "Alpaca":
-                if num_turns == 1:
+                if num_exchanges == 1:
                     conversation = {
                         "instruction": conv['question'],
                         "input": "",
@@ -277,7 +277,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                     }
             
             elif model_format == "ShareGPT":
-                if num_turns == 1:
+                if num_exchanges == 1:
                     conversation = {
                         "conversations": [
                             {"from": "human", "value": conv['question']},
@@ -388,15 +388,15 @@ def main():
         help="Number of Q&A pairs to generate per chunk"
     )
     
-    num_turns = st.sidebar.selectbox(
-        "Number of turns",
+    num_exchanges = st.sidebar.selectbox(
+        "Conversation exchanges",
         options=[1, 2],
-        index=1,
-        help="1 = User + Assistant, 2 = User + Assistant + User + Assistant"
+        index=0,
+        help="1 = Single exchange (User → Assistant), 2 = Two exchanges (User → Assistant → User → Assistant)"
     )
     
     model_format = st.sidebar.selectbox(
-        "Model format",
+        "Output format",
         options=["Gemma", "Llama", "ChatML", "Alpaca", "ShareGPT", "Generic"],
         index=0,
         help="Select the format for your target model"
@@ -412,108 +412,87 @@ def main():
     )
     
     # Main content area
-    col1, col2 = st.columns([1, 1])
+    st.subheader("🚀 Generate Dataset")
     
-    with col1:
-        st.subheader("📄 File Content Preview")
+    # Initialize generator
+    try:
+        generator = DatasetGenerator(selected_model, api_key)
         
-        # Initialize generator
-        try:
-            generator = DatasetGenerator(selected_model, api_key)
-            
-            # Read file content
-            if uploaded_file.type == "text/plain":
-                text_content = generator.read_text_file(uploaded_file)
-            else:  # PDF
-                text_content = generator.read_pdf_file(uploaded_file)
-            
-            if text_content:
-                st.text_area("Content preview", text_content[:1000] + "..." if len(text_content) > 1000 else text_content, height=200)
-                
-                # Split into chunks
-                chunks = generator.split_by_word_count(text_content, words_per_chunk)
-                st.info(f"📊 File will be split into {len(chunks)} chunks")
-                
-                # Show chunk details
-                with st.expander("View chunk details"):
-                    for i, chunk in enumerate(chunks[:3]):  # Show first 3 chunks
-                        st.write(f"**Chunk {i+1}** ({len(chunk.split())} words)")
-                        st.write(chunk[:200] + "..." if len(chunk) > 200 else chunk)
-                        st.write("---")
-                    if len(chunks) > 3:
-                        st.write(f"... and {len(chunks) - 3} more chunks")
-            
-        except Exception as e:
-            st.error(f"Error initializing generator: {e}")
-            return
-    
-    with col2:
-        st.subheader("🚀 Generate Dataset")
+        # Read file content
+        if uploaded_file.type == "text/plain":
+            text_content = generator.read_text_file(uploaded_file)
+        else:  # PDF
+            text_content = generator.read_pdf_file(uploaded_file)
         
-        if st.button("Generate Dataset", type="primary"):
-            if not text_content:
-                st.error("No content to process")
-                return
+        if text_content:
+            # Split into chunks
+            chunks = generator.split_by_word_count(text_content, words_per_chunk)
+            st.info(f"📊 File will be split into {len(chunks)} chunks of ~{words_per_chunk} words each")
             
-            # Progress tracking
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            generated_examples = []
-            
-            for i, chunk in enumerate(chunks):
-                status_text.text(f"Processing chunk {i+1}/{len(chunks)}...")
-                progress_bar.progress((i + 1) / len(chunks))
+            if st.button("Generate Dataset", type="primary"):
+                # Progress tracking
+                progress_bar = st.progress(0)
+                status_text = st.empty()
                 
-                conversations = generator.generate_qa_pairs(
-                    chunk, custom_prompt, questions_per_chunk, num_turns
-                )
+                generated_examples = []
                 
-                if conversations:
-                    formatted_examples = generator.format_for_model(
-                        conversations, model_format, num_turns
+                for i, chunk in enumerate(chunks):
+                    status_text.text(f"Processing chunk {i+1}/{len(chunks)} with {selected_model}...")
+                    progress_bar.progress((i + 1) / len(chunks))
+                    
+                    conversations = generator.generate_qa_pairs(
+                        chunk, custom_prompt, questions_per_chunk, num_exchanges
                     )
-                    generated_examples.extend(formatted_examples)
+                    
+                    if conversations:
+                        formatted_examples = generator.format_for_model(
+                            conversations, model_format, num_exchanges
+                        )
+                        generated_examples.extend(formatted_examples)
+                    
+                    # Add delay to be respectful to API
+                    time.sleep(1)
                 
-                # Add delay to be respectful to API
-                time.sleep(1)
-            
-            status_text.text("Dataset generation complete!")
-            
-            if generated_examples:
-                st.success(f"✅ Generated {len(generated_examples)} training examples!")
+                status_text.text("Dataset generation complete!")
                 
-                # Show sample
-                with st.expander("Preview generated examples"):
-                    for i, example in enumerate(generated_examples[:3]):
-                        st.write(f"**Example {i+1}:**")
-                        st.code(example, language="json")
-                        st.write("---")
-                
-                # Download button
-                dataset_content = "\n".join(generated_examples)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"dataset_{model_format.lower()}_{timestamp}.jsonl"
-                
-                st.download_button(
-                    label="📥 Download Dataset",
-                    data=dataset_content,
-                    file_name=filename,
-                    mime="application/json"
-                )
-                
-                # Show statistics
-                st.subheader("📈 Generation Statistics")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Examples", len(generated_examples))
-                with col2:
-                    st.metric("Chunks Processed", len(chunks))
-                with col3:
-                    st.metric("Success Rate", f"{len(generated_examples)/(len(chunks)*questions_per_chunk)*100:.1f}%")
-                
-            else:
-                st.error("No examples were generated. Please check your settings and try again.")
+                if generated_examples:
+                    st.success(f"✅ Generated {len(generated_examples)} training examples!")
+                    
+                    # Show sample
+                    with st.expander("Preview generated examples"):
+                        for i, example in enumerate(generated_examples[:3]):
+                            st.write(f"**Example {i+1}:**")
+                            st.code(example, language="json")
+                            st.write("---")
+                    
+                    # Download button
+                    dataset_content = "\n".join(generated_examples)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"dataset_{model_format.lower()}_{timestamp}.jsonl"
+                    
+                    st.download_button(
+                        label="📥 Download Dataset",
+                        data=dataset_content,
+                        file_name=filename,
+                        mime="application/json"
+                    )
+                    
+                    # Show statistics
+                    st.subheader("📈 Generation Statistics")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Total Examples", len(generated_examples))
+                    with col2:
+                        st.metric("Chunks Processed", len(chunks))
+                    with col3:
+                        st.metric("Success Rate", f"{len(generated_examples)/(len(chunks)*questions_per_chunk)*100:.1f}%")
+                    
+                else:
+                    st.error("No examples were generated. Please check your settings and try again.")
+        
+    except Exception as e:
+        st.error(f"Error initializing generator: {e}")
+        return
 
 if __name__ == "__main__":
     main() 

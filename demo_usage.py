@@ -6,7 +6,7 @@ This can be useful for batch processing or integration into other tools.
 
 import os
 from dotenv import load_dotenv
-from dataset_generator_app import DatasetGenerator
+from app import DatasetGenerator
 
 def demo_text_processing():
     """Demonstrate text processing capabilities."""
@@ -14,14 +14,14 @@ def demo_text_processing():
     # Load environment variables
     load_dotenv()
     
-    # Get API key
+    # Get API key (using Gemini as default for demo)
     api_key = os.getenv('GEMINI_API_KEY')
     if not api_key:
         print("Please set your GEMINI_API_KEY in the .env file")
         return
     
-    # Initialize generator
-    generator = DatasetGenerator(api_key)
+    # Initialize generator with Gemini
+    generator = DatasetGenerator("Gemini", api_key)
     
     # Sample text for demonstration
     sample_text = """

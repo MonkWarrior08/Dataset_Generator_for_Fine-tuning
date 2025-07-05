@@ -1,9 +1,10 @@
 # Dataset Generator for Fine-tuning 📊
 
-A Streamlit-based tool for generating training datasets from text files and PDFs for fine-tuning language models. This tool uses Google's Gemini API to generate high-quality question-answer pairs in various formats compatible with different models.
+A Streamlit-based tool for generating training datasets from text files and PDFs for fine-tuning language models. This tool supports multiple AI models (Gemini, Claude, OpenAI) to generate high-quality question-answer pairs in various formats compatible with different models.
 
 ## Features ✨
 
+- **Multiple AI Models**: Choose from Gemini, Claude, or OpenAI for dataset generation
 - **File Upload**: Support for both text files (.txt) and PDF files (.pdf)
 - **Smart Chunking**: Split content by word count instead of manual delimiters
 - **Customizable Generation**: Control number of questions per chunk and conversation turns
@@ -100,11 +101,34 @@ answer<|im_end|>
 
 ## API Requirements 🔑
 
-You'll need a Google Gemini API key to use this tool:
+You'll need an API key for at least one of the supported AI models:
 
+### Google Gemini
 1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
 2. Create an API key
-3. Add it to your `.env` file or enter it in the app
+3. Add `GEMINI_API_KEY=your_key_here` to your `.env` file
+
+### Anthropic Claude
+1. Go to [Anthropic Console](https://console.anthropic.com/)
+2. Create an API key
+3. Add `ANTHROPIC_API_KEY=your_key_here` to your `.env` file
+
+### OpenAI
+1. Go to [OpenAI Platform](https://platform.openai.com/api-keys)
+2. Create an API key
+3. Add `OPENAI_API_KEY=your_key_here` to your `.env` file
+
+You can also enter API keys directly in the app interface.
+
+## Model Selection Guide 🎯
+
+For detailed comparison of the three AI models, see [MODEL_COMPARISON.md](MODEL_COMPARISON.md).
+
+**Quick recommendations:**
+- **Beginners**: Start with Gemini (free tier)
+- **High quality**: Use Claude for best results
+- **Creative content**: Try OpenAI or Claude
+- **Large datasets**: Use Gemini for cost efficiency
 
 ## Tips for Best Results 💡
 
@@ -119,6 +143,8 @@ You'll need a Google Gemini API key to use this tool:
 - **PDF Issues**: Ensure PDF files are text-based (not scanned images)
 - **Memory Issues**: Reduce chunk size or questions per chunk for large files
 - **Generation Failures**: Try adjusting your custom prompt or reducing complexity
+- **Model Selection**: If a model isn't available, install required packages (`pip install -r requirements.txt`)
+- **Missing Dependencies**: Some models require additional packages (anthropic, openai)
 
 ## Example Use Cases 📝
 
@@ -127,6 +153,19 @@ You'll need a Google Gemini API key to use this tool:
 - Customer service chatbot training
 - Technical documentation Q&A
 - Creative writing assistance
+
+## Demo Scripts 🧪
+
+The repository includes demo scripts to help you get started:
+
+- **`demo_usage.py`**: Basic usage with Gemini
+- **`multi_model_demo.py`**: Compare all three AI models
+- **`MODEL_COMPARISON.md`**: Detailed model comparison guide
+
+Run the multi-model demo to see how different AI models perform:
+```bash
+python multi_model_demo.py
+```
 
 ## License 📄
 

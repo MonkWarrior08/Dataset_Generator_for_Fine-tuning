@@ -14,10 +14,25 @@ cp env_template.txt .env
 
 ## Step 2: Get Your API Key
 
+Choose one of the supported AI models and get an API key:
+
+### Option A: Google Gemini (Recommended)
 1. Go to [Google AI Studio](https://makersuite.google.com/app/apikey)
 2. Click "Create API Key"
 3. Copy your API key
-4. Edit `.env` file and replace `your_api_key_here` with your actual API key
+4. Edit `.env` file and replace `your_gemini_api_key_here` with your actual API key
+
+### Option B: Anthropic Claude
+1. Go to [Anthropic Console](https://console.anthropic.com/)
+2. Create an API key
+3. Copy your API key
+4. Edit `.env` file and replace `your_claude_api_key_here` with your actual API key
+
+### Option C: OpenAI
+1. Go to [OpenAI Platform](https://platform.openai.com/api-keys)
+2. Create an API key
+3. Copy your API key
+4. Edit `.env` file and replace `your_openai_api_key_here` with your actual API key
 
 ## Step 3: Run the Application
 
@@ -29,15 +44,16 @@ The application will open in your browser at `http://localhost:8501`
 
 ## First Dataset Generation
 
-1. **Upload a file**: Click "Choose a file" and upload a .txt or .pdf file
-2. **Configure settings**:
+1. **Select AI model**: Choose from Gemini, Claude, or OpenAI
+2. **Upload a file**: Click "Choose a file" and upload a .txt or .pdf file
+3. **Configure settings**:
    - Words per chunk: 300 (good starting point)
    - Questions per chunk: 3
    - Number of turns: 2 (for conversations)
    - Model format: Choose your target model (e.g., "Gemma")
-3. **Customize prompt**: Edit the generation prompt if needed
-4. **Generate**: Click "Generate Dataset" and wait for completion
-5. **Download**: Click "Download Dataset" to save your JSONL file
+4. **Customize prompt**: Edit the generation prompt if needed
+5. **Generate**: Click "Generate Dataset" and wait for completion
+6. **Download**: Click "Download Dataset" to save your JSONL file
 
 ## Example Files to Try
 

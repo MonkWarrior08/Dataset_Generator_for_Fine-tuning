@@ -11,14 +11,37 @@ import PyPDF2
 import io
 from datetime import datetime
 
+# Optional imports with error handling
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
+
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
 # Load environment variables
 load_dotenv()
 
 class DatasetGenerator:
-    def __init__(self, api_key: str):
-        """Initialize the dataset generator with Gemini API key."""
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-2.5-flash')
+    def __init__(self, model_provider: str, api_key: str):
+        """Initialize the dataset generator with selected AI model."""
+        self.model_provider = model_provider
+        self.api_key = api_key
+        
+        if model_provider == "Gemini":
+            genai.configure(api_key=api_key)
+            self.model = genai.GenerativeModel('gemini-2.5-flash')
+        elif model_provider == "Claude" and ANTHROPIC_AVAILABLE:
+            self.model = anthropic.Anthropic(api_key=api_key)
+        elif model_provider == "OpenAI" and OPENAI_AVAILABLE:
+            self.model = openai.OpenAI(api_key=api_key)
+        else:
+            raise ValueError(f"Unsupported model provider: {model_provider}")
         
     def read_text_file(self, uploaded_file) -> str:
         """Read uploaded text file."""
@@ -53,7 +76,7 @@ class DatasetGenerator:
         return chunks
     
     def generate_qa_pairs(self, chunk: str, custom_prompt: str, num_questions: int, num_turns: int) -> List[Dict]:
-        """Generate Q&A pairs for a given chunk using Gemini."""
+        """Generate Q&A pairs for a given chunk using selected AI model."""
         
         if num_turns == 1:
             format_instructions = """
@@ -94,11 +117,11 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
         max_retries = 3
         for attempt in range(max_retries):
             try:
-                response = self.model.generate_content(prompt)
-                if response.text:
-                    return self.parse_qa_response(response.text, num_turns)
+                response_text = self._get_model_response(prompt)
+                if response_text:
+                    return self.parse_qa_response(response_text, num_turns)
                 else:
-                    st.warning(f"Empty response from Gemini on attempt {attempt + 1}")
+                    st.warning(f"Empty response from {self.model_provider} on attempt {attempt + 1}")
             except Exception as e:
                 st.error(f"Error generating Q&A pairs (attempt {attempt + 1}/{max_retries}): {e}")
                 if attempt < max_retries - 1:
@@ -107,6 +130,36 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                     st.error("Max retries reached, skipping this chunk")
         
         return []
+    
+    def _get_model_response(self, prompt: str) -> str:
+        """Get response from the selected AI model."""
+        if self.model_provider == "Gemini":
+            response = self.model.generate_content(prompt)
+            return response.text if response.text else ""
+        
+        elif self.model_provider == "Claude":
+            response = self.model.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.content[0].text if response.content else ""
+        
+        elif self.model_provider == "OpenAI":
+            response = self.model.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4000,
+                temperature=0.7
+            )
+            return response.choices[0].message.content if response.choices else ""
+        
+        else:
+            raise ValueError(f"Unsupported model provider: {self.model_provider}")
     
     def parse_qa_response(self, response_text: str, num_turns: int) -> List[Dict]:
         """Parse Gemini response into structured conversation pairs."""
@@ -261,16 +314,46 @@ def main():
     # Sidebar for configuration
     st.sidebar.header("⚙️ Configuration")
     
-    # API Key input
-    api_key = st.sidebar.text_input(
-        "Gemini API Key",
-        value=os.getenv('GEMINI_API_KEY', ''),
-        type="password",
-        help="Enter your Google Gemini API key"
+    # Model selection
+    st.sidebar.subheader("🤖 AI Model Selection")
+    available_models = ["Gemini"]
+    if ANTHROPIC_AVAILABLE:
+        available_models.append("Claude")
+    if OPENAI_AVAILABLE:
+        available_models.append("OpenAI")
+    
+    selected_model = st.sidebar.selectbox(
+        "Choose AI Model",
+        options=available_models,
+        index=0,
+        help="Select the AI model to generate your dataset"
     )
     
+    # API Key input based on selected model
+    if selected_model == "Gemini":
+        api_key = st.sidebar.text_input(
+            "Gemini API Key",
+            value=os.getenv('GEMINI_API_KEY', ''),
+            type="password",
+            help="Enter your Google Gemini API key"
+        )
+    elif selected_model == "Claude":
+        api_key = st.sidebar.text_input(
+            "Claude API Key",
+            value=os.getenv('ANTHROPIC_API_KEY', ''),
+            type="password",
+            help="Enter your Anthropic Claude API key"
+        )
+    elif selected_model == "OpenAI":
+        api_key = st.sidebar.text_input(
+            "OpenAI API Key",
+            value=os.getenv('OPENAI_API_KEY', ''),
+            type="password",
+            help="Enter your OpenAI API key"
+        )
+    
     if not api_key:
-        st.warning("Please enter your Gemini API key to continue")
+        st.warning(f"Please enter your {selected_model} API key to continue")
         return
     
     # File upload
@@ -336,7 +419,7 @@ def main():
         
         # Initialize generator
         try:
-            generator = DatasetGenerator(api_key)
+            generator = DatasetGenerator(selected_model, api_key)
             
             # Read file content
             if uploaded_file.type == "text/plain":

@@ -2,6 +2,8 @@
 
 A Streamlit-based tool for generating training datasets from text files and PDFs for fine-tuning language models. This tool supports multiple AI models (Gemini, Claude, OpenAI) to generate high-quality question-answer pairs in various formats compatible with different models.
 
+<img width="1998" alt="Screenshot 2025-07-05 at 4 31 34 PM" src="https://github.com/user-attachments/assets/e35dd885-2a36-43b2-9241-b9b5181d9133" />
+
 ## Features ✨
 
 - **Multiple AI Models**: Choose from Gemini, Claude, or OpenAI for dataset generation

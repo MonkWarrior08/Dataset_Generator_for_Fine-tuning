@@ -345,7 +345,7 @@ def main():
     elif selected_model == "Claude":
         specific_model = st.sidebar.selectbox(
             "Choose Claude Model",
-            options=["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"],
+            options=["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-7-sonnet-latest"],
             index=0,
             help="Select specific Claude model"
         )

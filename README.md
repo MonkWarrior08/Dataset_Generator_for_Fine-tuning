@@ -71,8 +71,8 @@ You'll need an API key for at least one of the supported AI models:
 
 - **Words per chunk**: 50-2000 words (default: 300)
 - **Questions per chunk**: 1-10 questions (default: 3)
-- **Conversation exchanges**: 1 or 2 exchanges
-- **Model format**: Choose from 6 supported formats
+- **Conversation exchanges**: 1-5 exchanges
+- **Model format**: Choose from 4 supported formats
 - **Custom prompt**: Personalize the generation instructions
 
 ## License 📄

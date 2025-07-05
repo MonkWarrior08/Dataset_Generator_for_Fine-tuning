@@ -37,7 +37,7 @@ Choose one of the supported AI models and get an API key:
 ## Step 3: Run the Application
 
 ```bash
-streamlit run dataset_generator_app.py
+streamlit run app.py
 ```
 
 The application will open in your browser at `http://localhost:8501`
@@ -45,42 +45,38 @@ The application will open in your browser at `http://localhost:8501`
 ## First Dataset Generation
 
 1. **Select AI model**: Choose from Gemini, Claude, or OpenAI
-2. **Upload a file**: Click "Choose a file" and upload a .txt or .pdf file
-3. **Configure settings**:
+2. **Choose specific model**: Select the exact model variant you want
+3. **Upload a file**: Click "Choose a file" and upload a .txt or .pdf file
+4. **Configure settings**:
    - Words per chunk: 300 (good starting point)
    - Questions per chunk: 3
-   - Number of turns: 2 (for conversations)
-   - Model format: Choose your target model (e.g., "Gemma")
-4. **Customize prompt**: Edit the generation prompt if needed
-5. **Generate**: Click "Generate Dataset" and wait for completion
-6. **Download**: Click "Download Dataset" to save your JSONL file
+   - Conversation exchanges: 1-5 (number of back-and-forth exchanges)
+   - Output format: Choose your target model format
+5. **Write custom prompt**: Enter your generation prompt in the main area
+6. **Generate**: Click "Generate Dataset" and wait for completion
+7. **Download**: Click "Download Dataset" to save your JSONL file
 
-## Example Files to Try
+## Available Models
 
-Create a sample text file with this content:
+### Gemini Models
+- **gemini-2.5-flash**: Fast and efficient
+- **gemini-2.5-pro**: Higher quality, slower
+- **gemini-1.5-flash**: Previous generation, fast
 
-```
-Climate change refers to long-term shifts in global temperatures and weather patterns. While climate variations occur naturally, human activities have become the primary driver of climate change since the 1800s. The burning of fossil fuels like coal, oil, and gas produces greenhouse gases that trap heat in Earth's atmosphere.
+### Claude Models
+- **claude-3-5-sonnet**: Best balance of speed and quality
+- **claude-3-5-haiku**: Fastest, good for simple tasks
 
-The effects of climate change include rising sea levels, more frequent extreme weather events, changes in precipitation patterns, and shifts in wildlife habitats. These changes pose significant challenges to human societies, economies, and ecosystems worldwide.
+### OpenAI Models
+- **gpt-4o**: Latest and most capable
+- **gpt-4o-mini**: Smaller, faster version
+- **o3-mini**: Advanced reasoning model
 
-Addressing climate change requires both mitigation efforts to reduce greenhouse gas emissions and adaptation strategies to cope with unavoidable changes. This includes transitioning to renewable energy sources, improving energy efficiency, protecting and restoring natural ecosystems, and developing climate-resilient infrastructure.
-```
+## Output Formats
 
-Save this as `climate_change.txt` and upload it to test the generator!
-
-## Troubleshooting
-
-- **API Key Error**: Make sure your API key is correctly set in the `.env` file
-- **File Upload Issues**: Ensure your file is in .txt or .pdf format
-- **Generation Failures**: Try reducing the number of questions per chunk
-- **PDF Problems**: Make sure your PDF contains searchable text (not just images)
-
-## Pro Tips 💡
-
-- Start with smaller files (under 10 pages) to test the system
-- Use 200-500 words per chunk for optimal results
-- Adjust the custom prompt based on your specific use case
-- Download your datasets regularly - they're not saved automatically
+- **Gemma**: Google's Gemma model format
+- **Llama**: Meta's Llama model format
+- **OpenAI**: OpenAI's message format
+- **Alpaca**: Stanford's Alpaca format
 
 Ready to create your first dataset? Let's go! 🎉 

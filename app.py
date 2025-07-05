@@ -28,14 +28,15 @@ except ImportError:
 load_dotenv()
 
 class DatasetGenerator:
-    def __init__(self, model_provider: str, api_key: str):
+    def __init__(self, model_provider: str, specific_model: str, api_key: str):
         """Initialize the dataset generator with selected AI model."""
         self.model_provider = model_provider
+        self.specific_model = specific_model
         self.api_key = api_key
         
         if model_provider == "Gemini":
             genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel('gemini-2.5-flash')
+            self.model = genai.GenerativeModel(specific_model)
         elif model_provider == "Claude" and ANTHROPIC_AVAILABLE:
             self.model = anthropic.Anthropic(api_key=api_key)
         elif model_provider == "OpenAI" and OPENAI_AVAILABLE:
@@ -85,14 +86,14 @@ CONVERSATION X:
 QUESTION: [user question, all lowercase]
 ANSWER: [AI response based on text]
 """
-        else:  # num_exchanges == 2
-            format_instructions = """
+        else:
+            format_instructions = f"""
 Format for each conversation:
 CONVERSATION X:
 QUESTION: [initial question from user, all lowercase]
 ANSWER: [AI response based on text]
-FOLLOW-UP: [natural follow-up question, all lowercase]
-FOLLOW-UP ANSWER: [AI response to follow-up, also based on text]
+{'FOLLOW-UP: [follow-up question, all lowercase]' * (num_exchanges - 1)}
+{'FOLLOW-UP ANSWER: [AI response to follow-up, also based on text]' * (num_exchanges - 1)}
 """
         
         prompt = f"""
@@ -139,7 +140,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
         
         elif self.model_provider == "Claude":
             response = self.model.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.specific_model,
                 max_tokens=4000,
                 messages=[
                     {"role": "user", "content": prompt}
@@ -148,14 +149,26 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
             return response.content[0].text if response.content else ""
         
         elif self.model_provider == "OpenAI":
-            response = self.model.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=4000,
-                temperature=0.7
-            )
+            # Handle different parameter requirements for different OpenAI models
+            if "o1-" in self.specific_model or "o3-" in self.specific_model:
+                # o1 and o3 models use max_completion_tokens instead of max_tokens
+                response = self.model.chat.completions.create(
+                    model=self.specific_model,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_completion_tokens=4000
+                )
+            else:
+                # Standard GPT models use max_tokens
+                response = self.model.chat.completions.create(
+                    model=self.specific_model,
+                    messages=[
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=4000,
+                    temperature=0.7
+                )
             return response.choices[0].message.content if response.choices else ""
         
         else:
@@ -190,14 +203,15 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                                     'answer': answer
                                 })
                 else:
-                    # Parse two exchange conversation
-                    if 'QUESTION:' in part and 'ANSWER:' in part and 'FOLLOW-UP:' in part and 'FOLLOW-UP ANSWER:' in part:
+                    # Parse multi-exchange conversation
+                    if 'QUESTION:' in part and 'ANSWER:' in part:
                         sections = part.split('QUESTION:', 1)[1]
                         
                         if 'ANSWER:' in sections:
                             question_part, rest = sections.split('ANSWER:', 1)
                             question = question_part.strip()
                             
+                            # Extract first answer
                             if 'FOLLOW-UP:' in rest:
                                 answer_part, followup_rest = rest.split('FOLLOW-UP:', 1)
                                 answer = answer_part.strip()
@@ -250,14 +264,22 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                         "text": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{conv['question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['answer']}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{conv['followup_question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['followup_answer']}<|eot_id|>"
                     }
             
-            elif model_format == "ChatML":
+            elif model_format == "OpenAI":
                 if num_exchanges == 1:
                     conversation = {
-                        "text": f"<|im_start|>user\n{conv['question']}<|im_end|>\n<|im_start|>assistant\n{conv['answer']}<|im_end|>"
+                        "messages": [
+                            {"role": "user", "content": conv['question']},
+                            {"role": "assistant", "content": conv['answer']}
+                        ]
                     }
                 else:
                     conversation = {
-                        "text": f"<|im_start|>user\n{conv['question']}<|im_end|>\n<|im_start|>assistant\n{conv['answer']}<|im_end|>\n<|im_start|>user\n{conv['followup_question']}<|im_end|>\n<|im_start|>assistant\n{conv['followup_answer']}<|im_end|>"
+                        "messages": [
+                            {"role": "user", "content": conv['question']},
+                            {"role": "assistant", "content": conv['answer']},
+                            {"role": "user", "content": conv['followup_question']},
+                            {"role": "assistant", "content": conv['followup_answer']}
+                        ]
                     }
             
             elif model_format == "Alpaca":
@@ -276,25 +298,7 @@ Generate exactly {num_questions} conversations that thoroughly cover the content
                         "follow_up_output": conv['followup_answer']
                     }
             
-            elif model_format == "ShareGPT":
-                if num_exchanges == 1:
-                    conversation = {
-                        "conversations": [
-                            {"from": "human", "value": conv['question']},
-                            {"from": "gpt", "value": conv['answer']}
-                        ]
-                    }
-                else:
-                    conversation = {
-                        "conversations": [
-                            {"from": "human", "value": conv['question']},
-                            {"from": "gpt", "value": conv['answer']},
-                            {"from": "human", "value": conv['followup_question']},
-                            {"from": "gpt", "value": conv['followup_answer']}
-                        ]
-                    }
-            
-            else:  # Generic format
+            else:  # Default format
                 conversation = conv
             
             formatted_examples.append(json.dumps(conversation, ensure_ascii=False))
@@ -323,38 +327,41 @@ def main():
         available_models.append("OpenAI")
     
     selected_model = st.sidebar.selectbox(
-        "Choose AI Model",
+        "Choose AI Provider",
         options=available_models,
         index=0,
-        help="Select the AI model to generate your dataset"
+        help="Select the AI model provider"
     )
     
-    # API Key input based on selected model
+    # Specific model selection based on provider
     if selected_model == "Gemini":
-        api_key = st.sidebar.text_input(
-            "Gemini API Key",
-            value=os.getenv('GEMINI_API_KEY', ''),
-            type="password",
-            help="Enter your Google Gemini API key"
+        specific_model = st.sidebar.selectbox(
+            "Choose Gemini Model",
+            options=["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"],
+            index=0,
+            help="Select specific Gemini model"
         )
+        api_key = os.getenv('GEMINI_API_KEY', '')
     elif selected_model == "Claude":
-        api_key = st.sidebar.text_input(
-            "Claude API Key",
-            value=os.getenv('ANTHROPIC_API_KEY', ''),
-            type="password",
-            help="Enter your Anthropic Claude API key"
+        specific_model = st.sidebar.selectbox(
+            "Choose Claude Model",
+            options=["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-5-sonnet-20241022"],
+            index=0,
+            help="Select specific Claude model"
         )
+        api_key = os.getenv('ANTHROPIC_API_KEY', '')
     elif selected_model == "OpenAI":
-        api_key = st.sidebar.text_input(
-            "OpenAI API Key",
-            value=os.getenv('OPENAI_API_KEY', ''),
-            type="password",
-            help="Enter your OpenAI API key"
+        specific_model = st.sidebar.selectbox(
+            "Choose OpenAI Model",
+            options=["gpt-4o", "gpt-4o-mini", "o3-mini"],
+            index=0,
+            help="Select specific OpenAI model"
         )
+        api_key = os.getenv('OPENAI_API_KEY', '')
     
     if not api_key:
-        st.warning(f"Please enter your {selected_model} API key to continue")
-        return
+        st.error(f"Please set your {selected_model} API key in the .env file")
+        st.stop()
     
     # File upload
     st.sidebar.subheader("📁 Upload File")
@@ -390,33 +397,33 @@ def main():
     
     num_exchanges = st.sidebar.selectbox(
         "Conversation exchanges",
-        options=[1, 2],
+        options=[1, 2, 3, 4, 5],
         index=0,
-        help="1 = Single exchange (User → Assistant), 2 = Two exchanges (User → Assistant → User → Assistant)"
+        help="Number of back-and-forth exchanges in each conversation"
     )
     
     model_format = st.sidebar.selectbox(
         "Output format",
-        options=["Gemma", "Llama", "ChatML", "Alpaca", "ShareGPT", "Generic"],
+        options=["Gemma", "Llama", "OpenAI", "Alpaca"],
         index=0,
         help="Select the format for your target model"
-    )
-    
-    # Custom prompt
-    st.sidebar.subheader("✍️ Custom Prompt")
-    custom_prompt = st.sidebar.text_area(
-        "Generation prompt",
-        value="Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations.",
-        height=150,
-        help="Customize the prompt for generating Q&A pairs"
     )
     
     # Main content area
     st.subheader("🚀 Generate Dataset")
     
+    # Custom prompt in main area
+    st.subheader("✍️ Custom Generation Prompt")
+    custom_prompt = st.text_area(
+        "Enter your custom prompt for dataset generation:",
+        value="Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations.",
+        height=150,
+        help="Customize the prompt for generating Q&A pairs. This prompt will guide how the AI generates questions and answers from your content."
+    )
+    
     # Initialize generator
     try:
-        generator = DatasetGenerator(selected_model, api_key)
+        generator = DatasetGenerator(selected_model, specific_model, api_key)
         
         # Read file content
         if uploaded_file.type == "text/plain":
@@ -429,7 +436,7 @@ def main():
             chunks = generator.split_by_word_count(text_content, words_per_chunk)
             st.info(f"📊 File will be split into {len(chunks)} chunks of ~{words_per_chunk} words each")
             
-            if st.button("Generate Dataset", type="primary"):
+            if st.button("Generate Dataset", type="primary", use_container_width=True):
                 # Progress tracking
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -437,7 +444,7 @@ def main():
                 generated_examples = []
                 
                 for i, chunk in enumerate(chunks):
-                    status_text.text(f"Processing chunk {i+1}/{len(chunks)} with {selected_model}...")
+                    status_text.text(f"Processing chunk {i+1}/{len(chunks)} with {selected_model} ({specific_model})...")
                     progress_bar.progress((i + 1) / len(chunks))
                     
                     conversations = generator.generate_qa_pairs(
@@ -474,7 +481,8 @@ def main():
                         label="📥 Download Dataset",
                         data=dataset_content,
                         file_name=filename,
-                        mime="application/json"
+                        mime="application/json",
+                        use_container_width=True
                     )
                     
                     # Show statistics

@@ -1,309 +1,19 @@
+"""
+Streamlit app for dataset generation.
+"""
+
 import streamlit as st
 import os
-import json
-import re
-from typing import List, Dict, Tuple
-import google.generativeai as genai
-from pathlib import Path
-import time
-from dotenv import load_dotenv
-import PyPDF2
-import io
 from datetime import datetime
+from dotenv import load_dotenv
 
-# Optional imports with error handling
-try:
-    import anthropic
-    ANTHROPIC_AVAILABLE = True
-except ImportError:
-    ANTHROPIC_AVAILABLE = False
-
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
+from models import ModelManager
+from dataset_generator import DatasetGenerator
+from output_formats import OutputFormatter
 
 # Load environment variables
 load_dotenv()
 
-class DatasetGenerator:
-    def __init__(self, model_provider: str, specific_model: str, api_key: str):
-        """Initialize the dataset generator with selected AI model."""
-        self.model_provider = model_provider
-        self.specific_model = specific_model
-        self.api_key = api_key
-        
-        if model_provider == "Gemini":
-            genai.configure(api_key=api_key)
-            self.model = genai.GenerativeModel(specific_model)
-        elif model_provider == "Claude" and ANTHROPIC_AVAILABLE:
-            self.model = anthropic.Anthropic(api_key=api_key)
-        elif model_provider == "OpenAI" and OPENAI_AVAILABLE:
-            self.model = openai.OpenAI(api_key=api_key)
-        else:
-            raise ValueError(f"Unsupported model provider: {model_provider}")
-        
-    def read_text_file(self, uploaded_file) -> str:
-        """Read uploaded text file."""
-        try:
-            return str(uploaded_file.read(), "utf-8")
-        except Exception as e:
-            st.error(f"Error reading text file: {e}")
-            return ""
-    
-    def read_pdf_file(self, uploaded_file) -> str:
-        """Read uploaded PDF file."""
-        try:
-            pdf_reader = PyPDF2.PdfReader(uploaded_file)
-            text = ""
-            for page in pdf_reader.pages:
-                text += page.extract_text() + "\n"
-            return text
-        except Exception as e:
-            st.error(f"Error reading PDF file: {e}")
-            return ""
-    
-    def split_by_word_count(self, text: str, words_per_chunk: int) -> List[str]:
-        """Split text into chunks based on word count."""
-        words = text.split()
-        chunks = []
-        
-        for i in range(0, len(words), words_per_chunk):
-            chunk = ' '.join(words[i:i + words_per_chunk])
-            if chunk.strip():
-                chunks.append(chunk.strip())
-        
-        return chunks
-    
-    def generate_qa_pairs(self, chunk: str, custom_prompt: str, num_questions: int, num_exchanges: int) -> List[Dict]:
-        """Generate Q&A pairs for a given chunk using selected AI model."""
-        
-        if num_exchanges == 1:
-            format_instructions = """
-Format for each conversation:
-CONVERSATION X:
-QUESTION: [user question, all lowercase]
-ANSWER: [AI response based on text]
-"""
-        else:
-            format_instructions = f"""
-Format for each conversation:
-CONVERSATION X:
-QUESTION: [initial question from user, all lowercase]
-ANSWER: [AI response based on text]
-{'FOLLOW-UP: [follow-up question, all lowercase]' * (num_exchanges - 1)}
-{'FOLLOW-UP ANSWER: [AI response to follow-up, also based on text]' * (num_exchanges - 1)}
-"""
-        
-        prompt = f"""
-{custom_prompt}
-
-Based on the following text, generate {num_questions} conversation pairs with {num_exchanges} exchange(s) each.
-
-Requirements:
-- User questions should be natural and use lowercase
-- AI responses should be informative and based on the provided text
-- Cover the major concepts mentioned in the text
-- Each conversation should feel natural and educational
-
-{format_instructions}
-
-Text content:
-{chunk}
-
-Generate exactly {num_questions} conversations that thoroughly cover the content:
-"""
-        
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response_text = self._get_model_response(prompt)
-                if response_text:
-                    return self.parse_qa_response(response_text, num_exchanges)
-                else:
-                    st.warning(f"Empty response from {self.model_provider} on attempt {attempt + 1}")
-            except Exception as e:
-                st.error(f"Error generating Q&A pairs (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(3)
-                else:
-                    st.error("Max retries reached, skipping this chunk")
-        
-        return []
-    
-    def _get_model_response(self, prompt: str) -> str:
-        """Get response from the selected AI model."""
-        if self.model_provider == "Gemini":
-            response = self.model.generate_content(prompt)
-            return response.text if response.text else ""
-        
-        elif self.model_provider == "Claude":
-            response = self.model.messages.create(
-                model=self.specific_model,
-                max_tokens=4000,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ]
-            )
-            return response.content[0].text if response.content else ""
-        
-        elif self.model_provider == "OpenAI":
-            # Handle different parameter requirements for different OpenAI models
-            if "o1-" in self.specific_model or "o3-" in self.specific_model:
-                # o1 and o3 models use max_completion_tokens instead of max_tokens
-                response = self.model.chat.completions.create(
-                    model=self.specific_model,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_completion_tokens=4000
-                )
-            else:
-                # Standard GPT models use max_tokens
-                response = self.model.chat.completions.create(
-                    model=self.specific_model,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ],
-                    max_tokens=4000,
-                    temperature=0.7
-                )
-            return response.choices[0].message.content if response.choices else ""
-        
-        else:
-            raise ValueError(f"Unsupported model provider: {self.model_provider}")
-    
-    def parse_qa_response(self, response_text: str, num_exchanges: int) -> List[Dict]:
-        """Parse response into structured conversation pairs."""
-        conversations = []
-        
-        # Split by CONVERSATION to find each conversation
-        parts = response_text.split('CONVERSATION')[1:]  # Skip first empty part
-        
-        for part in parts:
-            try:
-                if num_exchanges == 1:
-                    # Parse single exchange conversation
-                    if 'QUESTION:' in part and 'ANSWER:' in part:
-                        sections = part.split('QUESTION:', 1)[1]
-                        
-                        if 'ANSWER:' in sections:
-                            question_part, answer_part = sections.split('ANSWER:', 1)
-                            question = question_part.strip()
-                            answer = answer_part.strip()
-                            
-                            # Clean up formatting
-                            question = re.sub(r'^[0-9]+\.?\s*', '', question).strip().lower()
-                            answer = re.sub(r'\n\n+', '\n\n', answer).strip()
-                            
-                            if question and answer:
-                                conversations.append({
-                                    'question': question,
-                                    'answer': answer
-                                })
-                else:
-                    # Parse multi-exchange conversation
-                    if 'QUESTION:' in part and 'ANSWER:' in part:
-                        sections = part.split('QUESTION:', 1)[1]
-                        
-                        if 'ANSWER:' in sections:
-                            question_part, rest = sections.split('ANSWER:', 1)
-                            question = question_part.strip()
-                            
-                            # Extract first answer
-                            if 'FOLLOW-UP:' in rest:
-                                answer_part, followup_rest = rest.split('FOLLOW-UP:', 1)
-                                answer = answer_part.strip()
-                                
-                                if 'FOLLOW-UP ANSWER:' in followup_rest:
-                                    followup_question_part, followup_answer_part = followup_rest.split('FOLLOW-UP ANSWER:', 1)
-                                    followup_question = followup_question_part.strip()
-                                    followup_answer = followup_answer_part.strip()
-                                    
-                                    # Clean up formatting
-                                    question = re.sub(r'^[0-9]+\.?\s*', '', question).strip().lower()
-                                    answer = re.sub(r'\n\n+', '\n\n', answer).strip()
-                                    followup_question = re.sub(r'^[0-9]+\.?\s*', '', followup_question).strip().lower()
-                                    followup_answer = re.sub(r'\n\n+', '\n\n', followup_answer).strip()
-                                    
-                                    if question and answer and followup_question and followup_answer:
-                                        conversations.append({
-                                            'question': question,
-                                            'answer': answer,
-                                            'followup_question': followup_question,
-                                            'followup_answer': followup_answer
-                                        })
-            except Exception as e:
-                continue
-        
-        return conversations
-    
-    def format_for_model(self, conversations: List[Dict], model_format: str, num_exchanges: int) -> List[str]:
-        """Format conversation pairs based on the selected model format."""
-        formatted_examples = []
-        
-        for conv in conversations:
-            if model_format == "Gemma":
-                if num_exchanges == 1:
-                    conversation = {
-                        "text": f"<start_of_turn>user\n{conv['question']}<end_of_turn>\n<start_of_turn>model\n{conv['answer']}<end_of_turn>"
-                    }
-                else:
-                    conversation = {
-                        "text": f"<start_of_turn>user\n{conv['question']}<end_of_turn>\n<start_of_turn>model\n{conv['answer']}<end_of_turn>\n<start_of_turn>user\n{conv['followup_question']}<end_of_turn>\n<start_of_turn>model\n{conv['followup_answer']}<end_of_turn>"
-                    }
-            
-            elif model_format == "Llama":
-                if num_exchanges == 1:
-                    conversation = {
-                        "text": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{conv['question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['answer']}<|eot_id|>"
-                    }
-                else:
-                    conversation = {
-                        "text": f"<|begin_of_text|><|start_header_id|>user<|end_header_id|>\n\n{conv['question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['answer']}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{conv['followup_question']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{conv['followup_answer']}<|eot_id|>"
-                    }
-            
-            elif model_format == "OpenAI":
-                if num_exchanges == 1:
-                    conversation = {
-                        "messages": [
-                            {"role": "user", "content": conv['question']},
-                            {"role": "assistant", "content": conv['answer']}
-                        ]
-                    }
-                else:
-                    conversation = {
-                        "messages": [
-                            {"role": "user", "content": conv['question']},
-                            {"role": "assistant", "content": conv['answer']},
-                            {"role": "user", "content": conv['followup_question']},
-                            {"role": "assistant", "content": conv['followup_answer']}
-                        ]
-                    }
-            
-            elif model_format == "Alpaca":
-                if num_exchanges == 1:
-                    conversation = {
-                        "instruction": conv['question'],
-                        "input": "",
-                        "output": conv['answer']
-                    }
-                else:
-                    conversation = {
-                        "instruction": conv['question'],
-                        "input": "",
-                        "output": conv['answer'],
-                        "follow_up_instruction": conv['followup_question'],
-                        "follow_up_output": conv['followup_answer']
-                    }
-            
-            else:  # Default format
-                conversation = conv
-            
-            formatted_examples.append(json.dumps(conversation, ensure_ascii=False))
-        
-        return formatted_examples
 
 def main():
     st.set_page_config(
@@ -320,11 +30,7 @@ def main():
     
     # Model selection
     st.sidebar.subheader("🤖 AI Model Selection")
-    available_models = ["Gemini"]
-    if ANTHROPIC_AVAILABLE:
-        available_models.append("Claude")
-    if OPENAI_AVAILABLE:
-        available_models.append("OpenAI")
+    available_models = ModelManager.get_available_models()
     
     selected_model = st.sidebar.selectbox(
         "Choose AI Provider",
@@ -334,30 +40,22 @@ def main():
     )
     
     # Specific model selection based on provider
-    if selected_model == "Gemini":
-        specific_model = st.sidebar.selectbox(
-            "Choose Gemini Model",
-            options=["gemini-2.5-flash", "gemini-2.5-pro", "gemini-1.5-flash"],
-            index=0,
-            help="Select specific Gemini model"
-        )
-        api_key = os.getenv('GEMINI_API_KEY', '')
-    elif selected_model == "Claude":
-        specific_model = st.sidebar.selectbox(
-            "Choose Claude Model",
-            options=["claude-sonnet-4-20250514", "claude-3-5-haiku-20241022", "claude-3-7-sonnet-latest"],
-            index=0,
-            help="Select specific Claude model"
-        )
-        api_key = os.getenv('ANTHROPIC_API_KEY', '')
-    elif selected_model == "OpenAI":
-        specific_model = st.sidebar.selectbox(
-            "Choose OpenAI Model",
-            options=["gpt-4o", "gpt-4o-mini", "o3-mini"],
-            index=0,
-            help="Select specific OpenAI model"
-        )
-        api_key = os.getenv('OPENAI_API_KEY', '')
+    model_variants = ModelManager.get_model_variants(selected_model)
+    specific_model = st.sidebar.selectbox(
+        f"Choose {selected_model} Model",
+        options=model_variants,
+        index=0,
+        help=f"Select specific {selected_model} model"
+    )
+    
+    # Get API key from environment
+    api_key_map = {
+        "Gemini": "GEMINI_API_KEY",
+        "Claude": "ANTHROPIC_API_KEY",
+        "OpenAI": "OPENAI_API_KEY"
+    }
+    
+    api_key = os.getenv(api_key_map.get(selected_model, ''), '')
     
     if not api_key:
         st.error(f"Please set your {selected_model} API key in the .env file")
@@ -404,7 +102,7 @@ def main():
     
     model_format = st.sidebar.selectbox(
         "Output format",
-        options=["Gemma", "Llama", "OpenAI", "Alpaca"],
+        options=OutputFormatter.get_available_formats(),
         index=0,
         help="Select the format for your target model"
     )
@@ -426,20 +124,25 @@ def main():
         generator = DatasetGenerator(selected_model, specific_model, api_key)
         
         # Read file content
-        if uploaded_file.type == "text/plain":
-            text_content = generator.read_text_file(uploaded_file)
-        else:  # PDF
-            text_content = generator.read_pdf_file(uploaded_file)
+        text_content = generator.read_file_content(uploaded_file)
         
         if text_content:
             # Split into chunks
-            chunks = generator.split_by_word_count(text_content, words_per_chunk)
+            chunks = generator.split_text_into_chunks(text_content, words_per_chunk)
             st.info(f"📊 File will be split into {len(chunks)} chunks of ~{words_per_chunk} words each")
             
             if st.button("Generate Dataset", type="primary", use_container_width=True):
                 # Progress tracking
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                
+                config = {
+                    'words_per_chunk': words_per_chunk,
+                    'questions_per_chunk': questions_per_chunk,
+                    'num_exchanges': num_exchanges,
+                    'model_format': model_format,
+                    'custom_prompt': custom_prompt
+                }
                 
                 generated_examples = []
                 
@@ -452,12 +155,13 @@ def main():
                     )
                     
                     if conversations:
-                        formatted_examples = generator.format_for_model(
+                        formatted_examples = generator.format_conversations(
                             conversations, model_format, num_exchanges
                         )
                         generated_examples.extend(formatted_examples)
                     
                     # Add delay to be respectful to API
+                    import time
                     time.sleep(1)
                 
                 status_text.text("Dataset generation complete!")
@@ -501,6 +205,7 @@ def main():
     except Exception as e:
         st.error(f"Error initializing generator: {e}")
         return
+
 
 if __name__ == "__main__":
     main() 

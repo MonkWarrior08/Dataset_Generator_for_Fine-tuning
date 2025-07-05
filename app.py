@@ -409,11 +409,11 @@ def main():
         help="Select the format for your target model"
     )
     
-    # Main content area
-    st.subheader("🚀 Generate Dataset")
-    
     # Custom prompt in main area
     st.subheader("✍️ Custom Generation Prompt")
+    st.markdown("""
+    This prompt will guide how the AI generates questions and answers from your content.
+    """)
     custom_prompt = st.text_area(
         "Enter your custom prompt for dataset generation:",
         value="Generate educational question-answer pairs that help users understand the content. Focus on practical applications and clear explanations.",
